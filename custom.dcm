@@ -1,0 +1,11 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP 5x7Segment
+D 5 digit 7 segment display
+$ENDCMP
+#
+$CMP MAX7221
+D LED Display Driver
+$ENDCMP
+#
+#End Doc Library
