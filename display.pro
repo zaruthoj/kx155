@@ -1,4 +1,4 @@
-update=Sat 29 Oct 2016 08:06:16 PM PDT
+update=Wed 25 Oct 2017 11:48:35 PM PDT
 version=1
 last_client=kicad
 [pcbnew]
@@ -27,7 +27,7 @@ NetIExt=net
 version=1
 [eeschema]
 version=1
-LibDir=
+LibDir=/home/jrparker/kicad/libraries/symbols
 [eeschema/libraries]
 LibName1=power
 LibName2=device
