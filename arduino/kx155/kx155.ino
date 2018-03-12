@@ -416,7 +416,12 @@ class SerialController {
           buffer[pos_] = '\0';
           pos_ = 0;
           if (strncmp(buffer, "ID", 2) == 0) {
-            identify(now);
+            Serial.println("KX155:2")
+            device_id_ = 0;
+            break;
+          }
+          if (strncmp(buffer, "INIT", 4) == 0) {
+	    send_switches(now);
             device_id_ = 0;
             break;
           }
@@ -456,13 +461,8 @@ class SerialController {
   }
   
  private:
-  void identify(unsigned long now) {
-    Serial.println("KX155:2");
+  void send_switches(unsigned long now) {
     com_radio_->send_power_on(now);
-    com_radio_->send_primary_frequency(now);
-    com_radio_->send_standby_frequency(now);
-    nav_radio_->send_primary_frequency(now);
-    nav_radio_->send_standby_frequency(now);
     com_radio_->send_50k_step(now);
     nav_radio_->send_nav_id(now);
   }
