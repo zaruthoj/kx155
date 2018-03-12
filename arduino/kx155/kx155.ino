@@ -58,16 +58,24 @@ public:
       led_control_g.setDigit(led_num_, i, digits[i], i == 2);
     }
 
-    Serial.print("FREQUENCY:");
-    Serial.print(led_num_+1);
-    Serial.print(":");
-    Serial.print(upper_ - 100);
-    Serial.print(".");
-    Serial.println(lower_);
-
+    send_frequency();
     needs_update_ = false;
   }
 
+  void send_frequency() {
+    Serial.print("FREQUENCY:");
+    Serial.print(led_num_+1);
+    Serial.print(":");
+    if (upper_ < 110) {
+      Serial.print("0");  
+    }
+    Serial.print(upper_ - 100);
+    if (lower_ < 100) {
+      Serial.print("0");  
+    }
+    Serial.println(lower_ / 10);
+  }
+  
   void step_upper(int dir) {
     upper_ = wrap(upper_ + dir, low_freq_, high_freq_);
     needs_update_ = true;
@@ -82,9 +90,13 @@ public:
     step_ = value ? 25 : 50;
   }
 
-  void set_frequency(int upper, int lower) {
+  void set_frequency(int upper, int lower_2d) {
     upper_ = wrap(upper, low_freq_, high_freq_);
-    lower_ = wrap(lower, 0, 1000);
+    lower_ = lower_2d * 10;
+    if (lower_2d % 5 != 0) {
+      lower_ += 5;
+    }
+    lower_ = wrap(lower_, 0, 1000);
     needs_update_ = true;
   }
 
@@ -276,8 +288,8 @@ public:
       id_(id),
       primary_display_(primary_disp, low_freq, high_freq),
       standby_display_(standby_disp, low_freq, high_freq),
-      small_enc_(small_enc_a, small_enc_b, primary_display_),
-      large_enc_(large_enc_a, large_enc_b, primary_display_),
+      small_enc_(small_enc_a, small_enc_b, standby_display_),
+      large_enc_(large_enc_a, large_enc_b, standby_display_),
       transfer_(trans) {}
 
   virtual void scan(unsigned long now) {
@@ -303,6 +315,13 @@ public:
     standby_display_.set_frequency(upper, lower);
   }
 
+  void send_primary_frequency(unsigned long now) {
+    primary_display_.send_frequency();
+  }
+
+  void send_standby_frequency(unsigned long now) {
+    standby_display_.send_frequency();
+  }
 protected:
   String id_;
   Display primary_display_;
@@ -321,20 +340,28 @@ public:
 
   virtual void scan(unsigned long now) {
     if (power_toggle_.scan(now)) {
-      bool power_off = power_toggle_.value(now) == HIGH;
+      bool power_on = power_toggle_.value(now) == LOW;
       for (int i = 0; i < LED_COUNT; ++i) {
-        led_control_g.shutdown(i, power_off);
-        Serial.print("SHUTDOWN:");
-        Serial.println(power_off);
+        led_control_g.shutdown(i, !power_on);
       }
+      send_power_on(now);
     }
     if (step_toggle_.scan(now)) {
       bool fine_step = step_toggle_.value(now) == HIGH;
-      primary_display_.set_fine_step(fine_step);
-      Serial.print("COM_25K_STEP:");
-      Serial.println(fine_step);
+      standby_display_.set_fine_step(fine_step);
+      send_50k_step(!fine_step);
     }
     Radio::scan(now);
+  }
+
+  void send_power_on(unsigned long now) {
+    Serial.print("POWER_ON:");
+    Serial.println(power_toggle_.value(now) == LOW);
+  }
+
+  void send_50k_step(unsigned long now) {
+    Serial.print("COM_50K_STEP:");
+    Serial.println(step_toggle_.value(now) == LOW);
   }
 private:
   Toggle step_toggle_;
@@ -349,10 +376,14 @@ public:
 
   virtual void scan(unsigned long now) {
     if (id_toggle_.scan(now)) {
-      Serial.print("NAV_ID:");
-      Serial.println(id_toggle_.value(now) == LOW);
+      send_nav_id(now);
     }
     Radio::scan(now);
+  }
+
+  virtual void send_nav_id(unsigned long now) {
+    Serial.print("NAV_ID:");
+    Serial.println(id_toggle_.value(now) == LOW);
   }
 private:
   Toggle id_toggle_;
@@ -364,12 +395,11 @@ class SerialController {
       com_radio_(com_radio),
       nav_radio_(nav_radio),
       pos_(0),
-      device_id_(0),
-      upper_(0) {
+      device_id_(0) {
     Serial.begin(9600);
   }
 
-  void scan() {
+  void scan(unsigned long now) {
     if (Serial.available() > 0) {
       if (pos_ >= SERIAL_BUF_SIZE) {
         pos_ = 0;
@@ -382,40 +412,40 @@ class SerialController {
           device_id_ = String(buffer).toInt();
           pos_ = 0;
           break;
-        case '.':
-          buffer[pos_] = '\0';
-          upper_ = String(buffer).toInt();
-          pos_ = 0;
-          break;
         case '\n': {
           buffer[pos_] = '\0';
-          int lower = String(buffer).toInt();
           pos_ = 0;
-  
-          if (device_id_ == 0 || upper_ == 0) {
+          if (strncmp(buffer, "ID", 2) == 0) {
+            identify(now);
             device_id_ = 0;
-            upper_ = 0;
+            break;
+          }
+          int frequency = String(buffer).toInt();
+          int upper = frequency / 100 + 100;
+          int lower = frequency % 100;
+  
+          if (device_id_ == 0) {
+            device_id_ = 0;
             return;
           }
   
           switch(device_id_) {
             case 1:
-              com_radio_->set_primary_frequency(upper_, lower);
+              com_radio_->set_primary_frequency(upper, lower);
               break;
             case 2:
-              com_radio_->set_standby_frequency(upper_, lower);
+              com_radio_->set_standby_frequency(upper, lower);
               break;
             case 3:
-              nav_radio_->set_primary_frequency(upper_, lower);
+              nav_radio_->set_primary_frequency(upper, lower);
               break;
             case 4:
-              nav_radio_->set_standby_frequency(upper_, lower);
+              nav_radio_->set_standby_frequency(upper, lower);
               break;
             default:
               break;
           }
           device_id_ = 0;
-          upper_ = 0;
           break;
         }
         default: {
@@ -426,12 +456,22 @@ class SerialController {
   }
   
  private:
+  void identify(unsigned long now) {
+    Serial.println("KX155:2");
+    com_radio_->send_power_on(now);
+    com_radio_->send_primary_frequency(now);
+    com_radio_->send_standby_frequency(now);
+    nav_radio_->send_primary_frequency(now);
+    nav_radio_->send_standby_frequency(now);
+    com_radio_->send_50k_step(now);
+    nav_radio_->send_nav_id(now);
+  }
+ 
   ComRadio* com_radio_;
   NavRadio* nav_radio_;
   char buffer[SERIAL_BUF_SIZE];
   int pos_;
   int device_id_;
-  int upper_;
 };
 
 ComRadio* com_radio;
@@ -451,7 +491,7 @@ void loop() {
   ++loop_count_g;
   com_radio->scan(loop_count_g);
   nav_radio->scan(loop_count_g);
-  serial_controller->scan();
+  serial_controller->scan(loop_count_g);
 
   if (loop_count_g - last_render_g > 40) {
     com_radio->render();
